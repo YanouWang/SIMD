@@ -3,8 +3,6 @@
 #include <assert.h>
 #include <chrono>
 #include<vector>
-#include<arm_neon.h>
-#include <thread>
 
 using namespace std;
 using namespace chrono;
@@ -84,50 +82,42 @@ Byte *StringProcess(string input, int *n_byte)
  * @return Byte消息数组
  */
 
- void MD5Hash_neon(vector<string> input, uint32_t state[4][4])
-{
+void MD5Hash_neon(vector<string> input, uint32_t state[4][4]) {
+    Byte** paddedMessage = new Byte * [4];
+    int* messageLength = new int[4];
+    for (int i = 0; i < 4; i++) {
+        paddedMessage[i] = StringProcess(input[i], &messageLength[i]);
+        assert(messageLength[i] == messageLength[0]);
+    }
+    int n_blocks = messageLength[0] / 64;
 
-	Byte **paddedMessage=new Byte*[4];
-	int *messageLength = new int[4];
-	for (int i = 0; i < 4; i += 1)
-	{
-		paddedMessage[i] = StringProcess(input[i], &messageLength[i]);
-		// cout<<messageLength[i]<<endl;
-		assert(messageLength[i] == messageLength[0]);
-	}
-	int n_blocks = messageLength[0] / 64;
-
-	// bit32* state= new bit32[4];
-	for(int i=0;i<4;i++){
+	for (int i = 0; i < 4; i++) {
 		state[i][0] = 0x67452301;
-	    state[i][1] = 0xefcdab89;
-	    state[i][2] = 0x98badcfe;
-	    state[i][3] = 0x10325476;
+		state[i][1] = 0xefcdab89;
+		state[i][2] = 0x98badcfe;
+		state[i][3] = 0x10325476;
 	}
 
-	// 逐block地更新state
-	for (int i = 0; i < n_blocks; i += 1)
-	{
-		uint32x4_t x[16];
+    for (int i = 0; i < n_blocks; i++) {
+        __m128i x[16];
 
-		// 下面的处理，在理解上较为复杂
-		for (int i1 = 0; i1 < 16; ++i1)
-		{
-			uint32_t temp[4];
-			for(int j=0;j<4;j++){
-				temp[j]=(paddedMessage[j][4 * i1 + i * 64]) |
-				        (paddedMessage[j][4 * i1 + 1 + i * 64] << 8) |
-				        (paddedMessage[j][4 * i1 + 2 + i * 64] << 16) |
-				        (paddedMessage[j][4 * i1 + 3 + i * 64] << 24);
-			}
-			x[i1] = vld1q_u32(temp);
-		}
-		uint32x4_t a = vdupq_n_u32(state[0][0]);
-        uint32x4_t b = vdupq_n_u32(state[0][1]);
-        uint32x4_t c = vdupq_n_u32(state[0][2]);
-        uint32x4_t d = vdupq_n_u32(state[0][3]);
+        for (int i1 = 0; i1 < 16; i1++) {
+            uint32_t temp[4];
+            for (int j = 0; j < 4; j++) {
+                temp[j] = (paddedMessage[j][4 * i1 + i * 64]) |
+                          (paddedMessage[j][4 * i1 + 1 + i * 64] << 8) |
+                          (paddedMessage[j][4 * i1 + 2 + i * 64] << 16) |
+                          (paddedMessage[j][4 * i1 + 3 + i * 64] << 24);
+            }
+            x[i1] = _mm_setr_epi32(temp[0], temp[1], temp[2], temp[3]);
+        }
+		__m128i a = _mm_setr_epi32(0x67452301, 0x67452301, 0x67452301, 0x67452301);
+		__m128i b = _mm_setr_epi32(0xefcdab89, 0xefcdab89, 0xefcdab89, 0xefcdab89);
+		__m128i c = _mm_setr_epi32(0x98badcfe, 0x98badcfe, 0x98badcfe, 0x98badcfe);
+		__m128i d = _mm_setr_epi32(0x10325476, 0x10325476, 0x10325476, 0x10325476);
 
 		auto start = system_clock::now();
+
 		/* Round 1 */
 		FF_neon(a, b, c, d, x[0], s11, 0xd76aa478);
 		FF_neon(d, a, b, c, x[1], s12, 0xe8c7b756);
@@ -200,49 +190,39 @@ Byte *StringProcess(string input, int *n_byte)
 		II_neon(c, d, a, b, x[2], s43, 0x2ad7d2bb);
 		II_neon(b, c, d, a, x[9], s44, 0xeb86d391);
 
-		state[0][0] += vgetq_lane_u32(a, 0);
-        state[0][1] += vgetq_lane_u32(b, 0);
-        state[0][2] += vgetq_lane_u32(c, 0);
-        state[0][3] += vgetq_lane_u32(d, 0);
-        state[1][0] += vgetq_lane_u32(a, 1);
-		state[1][1] += vgetq_lane_u32(b, 1);
-		state[1][2] += vgetq_lane_u32(c, 1);
-		state[1][3] += vgetq_lane_u32(d, 1);
-		state[2][0] += vgetq_lane_u32(a, 2);
-		state[2][1] += vgetq_lane_u32(b, 2);
-		state[2][2] += vgetq_lane_u32(c, 2);
-		state[2][3] += vgetq_lane_u32(d, 2);
-		state[3][0] += vgetq_lane_u32(a, 3);
-		state[3][1] += vgetq_lane_u32(b, 3);
-		state[3][2] += vgetq_lane_u32(c, 3);
-		state[3][3] += vgetq_lane_u32(d, 3);
-		
-	}
+		state[0][0] += _mm_extract_epi32(a, 0);
+		state[0][1] += _mm_extract_epi32(b, 0);
+		state[0][2] += _mm_extract_epi32(c, 0);
+		state[0][3] += _mm_extract_epi32(d, 0);
+		state[1][0] += _mm_extract_epi32(a, 1);
+		state[1][1] += _mm_extract_epi32(b, 1);
+		state[1][2] += _mm_extract_epi32(c, 1);
+		state[1][3] += _mm_extract_epi32(d, 1);
+		state[2][0] += _mm_extract_epi32(a, 2);
+		state[2][1] += _mm_extract_epi32(b, 2);
+		state[2][2] += _mm_extract_epi32(c, 2);
+		state[2][3] += _mm_extract_epi32(d, 2);
+		state[3][0] += _mm_extract_epi32(a, 3);
+		state[3][1] += _mm_extract_epi32(b, 3);
+		state[3][2] += _mm_extract_epi32(c, 3);
+		state[3][3] += _mm_extract_epi32(d, 3);
 
-	// 下面的处理，在理解上较为复杂
+    }
+
 	for (int i = 0; i < 4; i++)
 	{
-		for(int j=0;j<4;j++){
+		for (int j = 0; j < 4; j++) {
 			uint32_t value = state[i][j];
-		    state[i][j] = ((value & 0xff) << 24) |		 // 将最低字节移到最高位
+			state[i][j] = ((value & 0xff) << 24) |		 // 将最低字节移到最高位
 				          ((value & 0xff00) << 8) |	 // 将次低字节左移
 				          ((value & 0xff0000) >> 8) |	 // 将次高字节右移
 				          ((value & 0xff000000) >> 24); // 将最高字节移到最低位
 		}
 	}
 
-	// 输出最终的hash结果
-	// for (int i1 = 0; i1 < 4; i1 += 1)
-	// {
-	// 	cout << std::setw(8) << std::setfill('0') << hex << state[i1];
-	// }
-	// cout << endl;
-
-	// 释放动态分配的内存
-	// 实现SIMD并行算法的时候，也请记得及时回收内存！
-	for(int i=0;i<4;i++){
+	for (int i = 0; i < 4; i++) {
 		delete[] paddedMessage[i];
 	}
-	delete[] paddedMessage;
-	delete[] messageLength;
+    delete[] paddedMessage;
+    delete[] messageLength;
 }
